@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"
-GROUP_CHAT_ID = -shfrhtlvek  # 실제 그룹 ID로 바꿔주세요
+GROUP_CHAT_ID = -1002799021115  # 실제 그룹 ID로 바꿔주세요
 
 # 유저 잔액과 배팅 정보
 balances = {}
