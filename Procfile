@@ -1,2 +1,3 @@
-cmd = "python bot.py"
+[start]
+  cmd = "python bot.py"
   restart = "always"
