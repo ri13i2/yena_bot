@@ -1,129 +1,119 @@
 import asyncio
-import datetime
 import random
-import json
+from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"
+GROUP_CHAT_ID = -shfrhtlvek  # 실제 그룹 ID로 바꿔주세요
 
-users = {}
+# 유저 잔액과 배팅 정보
+balances = {}
 bets = {}
-results = {}
+game_running = False
 
-CARD_VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10']
-
+# 카드 생성 함수
 def draw_card():
-    return random.choice(CARD_VALUES)
+    return random.choice(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'])
 
-def card_point(card):
-    if card == 'A':
-        return 1
-    elif card in ['10']:
+def card_value(card):
+    if card in ['J', 'Q', 'K', '10']:
         return 0
-    else:
-        return int(card)
+    elif card == 'A':
+        return 1
+    return int(card)
 
 def calculate_score(cards):
-    return sum([card_point(card) for card in cards]) % 10
+    return sum([card_value(c) for c in cards]) % 10
 
+# 명령어 핸들러
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    users.setdefault(user_id, 100000)
-    await update.message.reply_text("🃏 예나찡 바카라에 오신 걸 환영합니다!\n/bet 명령어로 배팅해주세요.")
+    user_id = update.effective_user.id
+    balances[user_id] = 10000000
+    await update.message.reply_text("환영합니다! 잔액이 10,000,000원으로 설정되었습니다.")
 
-async def my_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    balance = users.get(user_id, 0)
-    await update.message.reply_text(f"💰 현재 보유금액: {balance:,}원")
+async def myinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    balance = balances.get(user_id, 0)
+    await update.message.reply_text(f"현재 잔액은 {balance:,}원 입니다.")
 
-async def bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    args = context.args
-    if len(args) != 2:
-        await update.message.reply_text("❌ 형식: /bet [플/뱅/타이] [금액]")
+async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global game_running
+    user_id = update.effective_user.id
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await update.message.reply_text("배팅 금액을 입력하세요. 예: /뱅 10000")
         return
 
-    position_map = {"플": "Player", "뱅": "Banker", "타이": "Tie"}
-    position = args[0]
-    amount = int(args[1])
-
-    if position not in position_map:
-        await update.message.reply_text("❌ 배팅 포지션은 플, 뱅, 타이 중 하나여야 합니다.")
+    amount = int(context.args[0])
+    if balances.get(user_id, 0) < amount:
+        await update.message.reply_text("❌ 잔액이 부족합니다. /myinfo 로 잔액 확인")
         return
 
-    balance = users.get(user_id, 0)
-    if balance < amount:
-        await update.message.reply_text("⚠️ 보유금액이 부족합니다!")
-        return
+    bet_type = update.message.text.split(" ")[0][1:]  # 명령어 이름 (뱅, 플, 타이 등)
+    balances[user_id] -= amount
+    bets[user_id] = (bet_type, amount)
+    await update.message.reply_text(f"✅ [{bet_type.upper()}] {amount:,}원 배팅 완료!")
 
-    users[user_id] -= amount
-    bets.setdefault(user_id, []).append({"position": position_map[position], "amount": amount})
+    if not game_running:
+        asyncio.create_task(game_loop(context.bot))
+        game_running = True
 
-    await update.message.reply_text(
-        f"🎲 배팅 완료!\n"
-        f"📌 배팅 항목: {position_map[position]}\n"
-        f"💵 배팅 금액: {amount:,}원\n"
-        f"⏱️ {datetime.datetime.now().strftime('%m월 %d일 %H:%M:%S')}"
-    )
+async def game_loop(bot):
+    global game_running
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎰 게임이 25초 후 시작됩니다. ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+    await asyncio.sleep(25)
 
-async def game_loop(app):
-    while True:
-        if bets:
-            await app.bot.send_message(chat_id=list(bets.keys())[0], text="🎰 게임 시작!")
+    player_cards = [draw_card(), draw_card()]
+    banker_cards = [draw_card(), draw_card()]
 
-            player_cards = [draw_card(), draw_card()]
-            banker_cards = [draw_card(), draw_card()]
-            player_score = calculate_score(player_cards)
-            banker_score = calculate_score(banker_cards)
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"플레이어 카드: {player_cards[0]} ?")
+    await asyncio.sleep(2)
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"뱅커 카드: {banker_cards[0]} ?")
+    await asyncio.sleep(2)
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"플레이어 두 번째 카드: {player_cards[1]}")
+    await asyncio.sleep(2)
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"뱅커 두 번째 카드: {banker_cards[1]}")
 
-            if player_score <= 5:
-                player_cards.append(draw_card())
-                player_score = calculate_score(player_cards)
+    player_score = calculate_score(player_cards)
+    banker_score = calculate_score(banker_cards)
 
-            if banker_score <= 5:
-                banker_cards.append(draw_card())
-                banker_score = calculate_score(banker_cards)
+    result = "타이"
+    if player_score > banker_score:
+        result = "플"
+    elif banker_score > player_score:
+        result = "뱅"
 
-            if player_score > banker_score:
-                winner = "Player"
-            elif banker_score > player_score:
-                winner = "Banker"
-            else:
-                winner = "Tie"
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"🎯 게임 결과: {result.upper()} (플: {player_score}, 뱅: {banker_score})")
 
-            for user_id, user_bets in bets.items():
-                total_win = 0
-                for b in user_bets:
-                    if b["position"] == winner:
-                        if winner == "Tie":
-                            win_amount = b["amount"] * 8
-                        else:
-                            win_amount = b["amount"] * 2
-                        users[user_id] += win_amount
-                        total_win += win_amount
+    # 결과 정산
+    for user_id, (bet_type, amount) in bets.items():
+        if bet_type == result:
+            balances[user_id] += amount * 2  # 1:1 배당
+            try:
+                await bot.send_message(chat_id=user_id, text=f"🎉 당첨! {amount*2:,}원 획득! 잔액: {balances[user_id]:,}원")
+            except:
+                pass
+        else:
+            try:
+                await bot.send_message(chat_id=user_id, text=f"💸 실패. 잔액: {balances[user_id]:,}원")
+            except:
+                pass
 
-                await app.bot.send_message(chat_id=user_id, text=(
-                    f"🎲 게임 결과!\n"
-                    f"👤 플레이어 카드: {player_cards} ({player_score})\n"
-                    f"🏦 뱅커 카드: {banker_cards} ({banker_score})\n"
-                    f"🏆 승자: {winner}\n"
-                    f"💰 적중금액: {total_win:,}원\n"
-                    f"📅 {datetime.datetime.now().strftime('%m월 %d일 %H:%M:%S')}"
-                ))
+    bets.clear()
+    game_running = False
 
-            bets.clear()
-
-        await asyncio.sleep(25)
-
+# 앱 실행
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("bet", bet))
-    app.add_handler(CommandHandler("내정보", my_info))
+    app.add_handler(CommandHandler("myinfo", myinfo))
+    app.add_handler(CommandHandler("뱅", bet_handler))
+    app.add_handler(CommandHandler("플", bet_handler))
+    app.add_handler(CommandHandler("타이", bet_handler))
+    app.add_handler(CommandHandler("플페어", bet_handler))
+    app.add_handler(CommandHandler("뱅페어", bet_handler))
 
-    asyncio.create_task(game_loop(app))
     await app.run_polling()
 
 if __name__ == "__main__":
