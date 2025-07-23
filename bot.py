@@ -3,26 +3,21 @@ import random
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
+    ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 )
 
-# 사용자 잔액 관리
 user_balances = {}
 bets = {}
-GROUP_CHAT_ID = -1001234567890  # 실제 그룹방 ID로 변경 필요
-
-# 카드 덱
+GROUP_CHAT_ID = -1002799021115  # 실제 그룹 ID로 바꿔주세요
 cards = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 
-# 잔액 확인 명령어
+# /내정보 명령 처리
 async def 내정보(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     balance = user_balances.get(user_id, 100000)
     await update.message.reply_text(f'💰 현재 잔액: {balance}원')
 
-# 게임 결과 기록 명령어
+# /바카라 명령 처리
 async def 바카라(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "history" not in context.bot_data:
         await update.message.reply_text("📭 아직 게임 기록이 없습니다.")
@@ -31,7 +26,7 @@ async def 바카라(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "\n".join(history)
         await update.message.reply_text(f"🎲 최근 게임 결과:\n{text}")
 
-# 배팅 명령어 공통 처리
+# 배팅 공통 처리
 async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -64,6 +59,7 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(25)
         await run_game(context)
 
+# 게임 실행
 async def run_game(context: ContextTypes.DEFAULT_TYPE):
     player_cards = [random.choice(cards), random.choice(cards)]
     banker_cards = [random.choice(cards), random.choice(cards)]
@@ -92,13 +88,11 @@ async def run_game(context: ContextTypes.DEFAULT_TYPE):
     msg += f"뱅커: {banker_cards} ({banker_sum})\n"
     msg += f"🎯 결과: {result} 승리"
 
-    # 잔액 정산
     winners = []
     for user_id, bet in bets.items():
         bet_type = bet["type"]
         amount = bet["amount"]
         name = bet["name"]
-        won = False
 
         if (bet_type == "플" and result == "플레이어") or \
            (bet_type == "뱅" and result == "뱅커") or \
@@ -117,12 +111,16 @@ async def run_game(context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg)
 
+# 한글 명령어는 필터로 처리
+def 명령필터(명령):
+    return MessageHandler(filters.TEXT & filters.Regex(f"^/{명령}$"), globals()[명령])
+
 # 봇 실행
 async def main():
-    app = ApplicationBuilder().token("YOUR_BOT_TOKEN").build()
+    app = ApplicationBuilder().token("8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4").build()
 
-    app.add_handler(CommandHandler("내정보", 내정보))
-    app.add_handler(CommandHandler("바카라", 바카라))
+    app.add_handler(명령필터("내정보"))
+    app.add_handler(명령필터("바카라"))
     app.add_handler(CommandHandler("뱅", bet_handler))
     app.add_handler(CommandHandler("플", bet_handler))
     app.add_handler(CommandHandler("타이", bet_handler))
