@@ -3,10 +3,15 @@ import logging
 import random
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"
-GROUP_CHAT_ID = -1002799021115  # 실제 그룹 ID로 교체
+GROUP_CHAT_ID = -1002799021115
 
 user_balances = {}
 bets = {}
@@ -46,7 +51,7 @@ def draw_cards():
 async def 내정보(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     balance = user_balances.get(user_id, 10000)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"💰 현재 잔액: {balance:,}원")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"\U0001F4B0 현재 잔액: {balance:,}원")
 
 # 배팅 핸들러
 async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,11 +61,13 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or user.first_name
     chat_id = update.effective_chat.id
 
-    if len(context.args) != 1 or not context.args[0].isdigit():
+    try:
+        cmd, amount_str = update.message.text[1:].split(" ", 1)
+        amount = int(amount_str)
+    except Exception:
         await update.message.reply_text("사용법: /플 10000 또는 /뱅 5000 등으로 입력해주세요.")
         return
 
-    amount = int(context.args[0])
     if amount <= 0:
         await update.message.reply_text("배팅 금액은 0보다 커야 합니다.")
         return
@@ -70,7 +77,6 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ 배팅 금액이 부족합니다.")
         return
 
-    cmd = update.message.text.split()[0][1:]
     bets.setdefault(user_id, {"금액": 0, "선택": "", "이름": username})
     bets[user_id]["금액"] = amount
     bets[user_id]["선택"] = cmd
@@ -89,17 +95,16 @@ async def run_game(context):
 
     cards = draw_cards()
 
-    # 플레이어 카드 추가 여부
     player_total = sum(cards["플레이어"]) % 10
     if player_total <= 5:
         cards["플레이어"].append(random.randint(1, 9))
 
     result = calculate_result(cards)
-    result_message = f"🃏 바카라 결과\n"
+    result_message = f"\U0001F0CF 바카라 결과\n"
     result_message += f"플레이어: {cards['플레이어']}\n"
     result_message += f"뱅커: {cards['뱅커']}\n"
-    result_message += f"🎯 결과: {result}\n"
-    result_message += f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    result_message += f"\U0001F3AF 결과: {result}\n"
+    result_message += f"\U0001F552 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
     await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=result_message)
 
@@ -115,17 +120,13 @@ async def run_game(context):
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("내정보", 내정보, block=False))
-    app.add_handler(CommandHandler("플", bet_handler, block=False))
-    app.add_handler(CommandHandler("뱅", bet_handler, block=False))
-    app.add_handler(CommandHandler("타이", bet_handler, block=False))
-    app.add_handler(CommandHandler("뱅페어", bet_handler, block=False))
-    app.add_handler(CommandHandler("바카라", 내정보, block=False))  # 테스트용 커맨드
+    app.add_handler(MessageHandler(filters.Regex("^/내정보"), 내정보))
+    app.add_handler(MessageHandler(filters.Regex("^/플 \\d+"), bet_handler))
+    app.add_handler(MessageHandler(filters.Regex("^/뱅 \\d+"), bet_handler))
+    app.add_handler(MessageHandler(filters.Regex("^/타이 \\d+"), bet_handler))
+    app.add_handler(MessageHandler(filters.Regex("^/뱅페어 \\d+"), bet_handler))
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    await app.run_polling()
 
 if __name__ == "__main__":
     import nest_asyncio
