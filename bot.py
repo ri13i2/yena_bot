@@ -3,132 +3,132 @@ import random
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
 )
 
-TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"  # 실제 봇 토큰으로 교체
-GROUP_CHAT_ID = -1002799021115  # 실제 그룹 ID로 교체
-
+# 사용자 잔액 관리
 user_balances = {}
-current_bets = {}
-game_running = False
-game_task = None
+bets = {}
+GROUP_CHAT_ID = -1001234567890  # 실제 그룹방 ID로 변경 필요
 
+# 카드 덱
+cards = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 
-def get_timestamp():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
+# 잔액 확인 명령어
 async def 내정보(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     balance = user_balances.get(user_id, 100000)
-    user_balances[user_id] = balance
-    await update.message.reply_text(f"💰 내 정보입니다\n현재 잔액: {balance:,}원")
+    await update.message.reply_text(f'💰 현재 잔액: {balance}원')
 
-
+# 게임 결과 기록 명령어
 async def 바카라(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("최근 게임 결과 15개는 아직 저장되지 않았습니다.")
+    if "history" not in context.bot_data:
+        await update.message.reply_text("📭 아직 게임 기록이 없습니다.")
+    else:
+        history = context.bot_data["history"][-15:]
+        text = "\n".join(history)
+        await update.message.reply_text(f"🎲 최근 게임 결과:\n{text}")
 
-
-async def 배팅처리(update: Update, context: ContextTypes.DEFAULT_TYPE, side: str):
+# 배팅 명령어 공통 처리
+async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if len(context.args) != 1 or not context.args[0].isdigit():
-        await update.message.reply_text("❌ 배팅 금액을 숫자로 정확히 입력해주세요.")
+    chat_id = update.effective_chat.id
+    user_name = update.effective_user.first_name
+    command = update.message.text.split()[0].replace("/", "")
+    args = context.args
+
+    if len(args) != 1 or not args[0].isdigit():
+        await update.message.reply_text("⚠️ 사용법: /명령어 금액 (예: /뱅 10000)")
         return
 
-    amount = int(context.args[0])
+    amount = int(args[0])
     balance = user_balances.get(user_id, 100000)
 
-    if balance < amount:
+    if amount > balance:
         await update.message.reply_text("❌ 잔액이 부족합니다.")
         return
 
     user_balances[user_id] = balance - amount
-    current_bets.setdefault(side, []).append((user_id, amount))
-    await update.message.reply_text(f"✅ {side.upper()}에 {amount:,}원 배팅 완료되었습니다.")
+    bets[user_id] = {"type": command, "amount": amount, "name": user_name}
 
-    global game_running, game_task
-    if not game_running:
-        game_task = asyncio.create_task(게임시작())
+    await update.message.reply_text(f"✅ {command.upper()}에 {amount}원 배팅 완료!")
 
+    if not context.bot_data.get("game_running"):
+        context.bot_data["game_running"] = True
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=f"🎰 누군가 배팅을 했습니다. 25초 후 게임이 시작됩니다.\n🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        await asyncio.sleep(25)
+        await run_game(context)
 
-async def 뱅(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await 배팅처리(update, context, "banker")
+async def run_game(context: ContextTypes.DEFAULT_TYPE):
+    player_cards = [random.choice(cards), random.choice(cards)]
+    banker_cards = [random.choice(cards), random.choice(cards)]
 
+    player_sum = sum(min(int(card), 10) if card != 'A' else 1 for card in player_cards) % 10
+    banker_sum = sum(min(int(card), 10) if card != 'A' else 1 for card in banker_cards) % 10
 
-async def 플(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await 배팅처리(update, context, "player")
+    if player_sum <= 5:
+        player_cards.append(random.choice(cards))
+        player_sum = sum(min(int(card), 10) if card != 'A' else 1 for card in player_cards) % 10
 
+    if banker_sum <= 5:
+        banker_cards.append(random.choice(cards))
+        banker_sum = sum(min(int(card), 10) if card != 'A' else 1 for card in banker_cards) % 10
 
-async def 타이(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await 배팅처리(update, context, "tie")
+    result = ""
+    if player_sum > banker_sum:
+        result = "플레이어"
+    elif banker_sum > player_sum:
+        result = "뱅커"
+    else:
+        result = "타이"
 
+    msg = f"🃏 카드 결과\n"
+    msg += f"플레이어: {player_cards} ({player_sum})\n"
+    msg += f"뱅커: {banker_cards} ({banker_sum})\n"
+    msg += f"🎯 결과: {result} 승리"
 
-async def 플페어(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await 배팅처리(update, context, "ppair")
+    # 잔액 정산
+    winners = []
+    for user_id, bet in bets.items():
+        bet_type = bet["type"]
+        amount = bet["amount"]
+        name = bet["name"]
+        won = False
 
+        if (bet_type == "플" and result == "플레이어") or \
+           (bet_type == "뱅" and result == "뱅커") or \
+           (bet_type == "타이" and result == "타이"):
+            user_balances[user_id] += amount * 2
+            winners.append(f"{name}님 ({bet_type}) +{amount}원 적중")
 
-async def 플뱅커(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await 배팅처리(update, context, "bpair")
+    if not winners:
+        msg += "\n❌ 이번 게임에서는 적중자가 없습니다."
+    else:
+        msg += "\n💸 적중자:\n" + "\n".join(winners)
 
+    context.bot_data.setdefault("history", []).append(result)
+    context.bot_data["game_running"] = False
+    bets.clear()
 
-async def 게임시작():
-    global game_running, current_bets
-    game_running = True
+    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg)
 
-    await asyncio.sleep(25)
-
-    deck = [random.randint(1, 10) for _ in range(6)]
-    p1, b1, p2, b2, p3 = deck[0], deck[1], deck[2], deck[3], deck[4]
-
-    player_total = p1 + p2
-    banker_total = b1 + b2
-
-    result_message = [f"🕓 {get_timestamp()} 기준 게임 결과"]
-    result_message.append(f"🃏 플레이어 카드: {p1}, {p2}")
-    result_message.append(f"🃏 뱅커 카드: {b1}, {b2}")
-
-    if player_total <= 5:
-        player_total += p3
-        result_message.append(f"➕ 플레이어 추가 카드: {p3}")
-
-    result = "tie"
-    if player_total % 10 > banker_total % 10:
-        result = "player"
-    elif player_total % 10 < banker_total % 10:
-        result = "banker"
-
-    result_message.append(f"🏆 최종 결과: {result.upper()} 승리")
-
-    await context_bot().send_message(GROUP_CHAT_ID, "\n".join(result_message))
-
-    # 정산
-    for user_id, amount in current_bets.get(result, []):
-        prize = amount * 2
-        user_balances[user_id] = user_balances.get(user_id, 0) + prize
-
-    current_bets.clear()
-    game_running = False
-
-
-def context_bot():
-    return ApplicationBuilder().token(TOKEN).build().bot
-
-
+# 봇 실행
 async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token("YOUR_BOT_TOKEN").build()
 
     app.add_handler(CommandHandler("내정보", 내정보))
     app.add_handler(CommandHandler("바카라", 바카라))
-    app.add_handler(CommandHandler("뱅", 뱅))
-    app.add_handler(CommandHandler("플", 플))
-    app.add_handler(CommandHandler("타이", 타이))
-    app.add_handler(CommandHandler("플페어", 플페어))
-    app.add_handler(CommandHandler("플뱅커", 플뱅커))
+    app.add_handler(CommandHandler("뱅", bet_handler))
+    app.add_handler(CommandHandler("플", bet_handler))
+    app.add_handler(CommandHandler("타이", bet_handler))
+    app.add_handler(CommandHandler("뱅페어", bet_handler))
 
-    print("✅ 바카라 봇 실행 중")
     await app.run_polling()
-
 
 if __name__ == "__main__":
     import nest_asyncio
