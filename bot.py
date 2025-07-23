@@ -10,7 +10,7 @@ from telegram.ext import (
 import random
 import nest_asyncio
 
-TOKEN = "YOUR_BOT_TOKEN"  # ← 여기에 실제 봇 토큰 입력
+TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"  # ← 여기에 실제 봇 토큰 입력
 users_file = "users.json"
 bets_file = "bets.json"
 results_file = "results.json"
