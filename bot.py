@@ -1,16 +1,12 @@
 import json
 import asyncio
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
 import random
 import nest_asyncio
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
-TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"  # ← 여기에 실제 봇 토큰 입력
+TOKEN = "8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4"  # 여기에 실제 봇 토큰 넣으세요
+
 users_file = "users.json"
 bets_file = "bets.json"
 results_file = "results.json"
@@ -34,79 +30,116 @@ def get_user(user_id):
     return users[str(user_id)]
 
 async def my_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user_id = str(update.effective_user.id)
     user = get_user(user_id)
     await update.message.reply_text(f"💰 현재 잔액: {user['balance']:,}원")
 
 async def baccarat_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = load_json(results_file)
     history = results.get("history", [])[-15:]
-    if not history:
-        await update.message.reply_text("아직 게임 결과가 없습니다.")
-    else:
-        await update.message.reply_text("🎲 최근 바카라 결과:\n" + "\n".join(history))
+    await update.message.reply_text("🎲 최근 결과:\n" + "\n".join(history) if history else "아직 결과 없음")
 
 async def handle_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    message = update.message.text.strip()
+    user_id = str(update.effective_user.id)
+    msg = update.message.text.strip()
     user = get_user(user_id)
-
-    commands = ["/뱅", "/플", "/타이", "/플페어", "/뱅페어"]
+    commands = ["/뱅", "/플", "/타이", "/플페어", "/플뱅커"]
     for cmd in commands:
-        if message.startswith(cmd):
+        if msg.startswith(cmd):
             try:
-                parts = message.split()
-                if len(parts) != 2:
-                    raise ValueError
-                amount = int(parts[1])
-                if amount <= 0:
-                    raise ValueError
+                amount = int(msg.split()[1])
                 if user["balance"] < amount:
-                    await update.message.reply_text("❗ 잔액이 부족합니다.")
+                    await update.message.reply_text("❗ 잔액 부족")
                     return
                 user["balance"] -= amount
-                save_json(users_file, load_json(users_file) | {str(user_id): user})
+                users = load_json(users_file)
+                users[user_id] = user
+                save_json(users_file, users)
 
                 bets = load_json(bets_file)
-                if str(user_id) not in bets:
-                    bets[str(user_id)] = []
-                bets[str(user_id)].append({"type": cmd, "amount": amount})
+                bets.setdefault(user_id, []).append({"type": cmd, "amount": amount})
                 save_json(bets_file, bets)
 
                 await update.message.reply_text(f"✅ {cmd}에 {amount:,}원 배팅 완료")
             except:
-                await update.message.reply_text("❗ 올바른 형식: /뱅 10000")
+                await update.message.reply_text("형식: /뱅 10000")
             return
+
+def draw_card():
+    return random.randint(1, 10)
+
+def calculate_total(cards):
+    return sum(cards) % 10
 
 async def game_loop():
     while True:
+        await asyncio.sleep(25)
         bets = load_json(bets_file)
+        if not bets:
+            continue
+
         results = load_json(results_file)
         users = load_json(users_file)
 
-        if bets:
-            outcome = random.choice(["플", "뱅", "타이"])
-            results.setdefault("history", []).append(outcome)
-            results["history"] = results["history"][-50:]
-            save_json(results_file, results)
+        # 카드 분배
+        player_cards = [draw_card()]
+        banker_cards = [draw_card()]
+        await broadcast(f"🃏 플레이어 첫 카드: {player_cards[0]}")
+        await broadcast(f"🃏 뱅커 첫 카드: {banker_cards[0]}")
 
-            for user_id, user_bets in bets.items():
-                user = users.get(user_id, {"balance": 100000})
-                for bet in user_bets:
-                    if bet["type"] == f"/{outcome}":
-                        user["balance"] += bet["amount"] * 2
-                users[user_id] = user
+        await asyncio.sleep(3)
+        player_cards.append(draw_card())
+        await broadcast(f"🃏 플레이어 두번째 카드: {player_cards[1]}")
+        await asyncio.sleep(3)
+        banker_cards.append(draw_card())
+        await broadcast(f"🃏 뱅커 두번째 카드: {banker_cards[1]}")
 
-            save_json(users_file, users)
-            save_json(bets_file, {})
+        player_total = calculate_total(player_cards)
+        banker_total = calculate_total(banker_cards)
 
-            for user_id in users:
-                try:
-                    await app.bot.send_message(chat_id=int(user_id), text=f"🎲 이번 게임 결과: {outcome}")
-                except:
-                    pass
+        await asyncio.sleep(3)
+        # 플레이어 추가 카드
+        if player_total <= 5:
+            third = draw_card()
+            player_cards.append(third)
+            await broadcast(f"🃏 플레이어 추가 카드: {third}")
+            player_total = calculate_total(player_cards)
 
-        await asyncio.sleep(60)
+        banker_total = calculate_total(banker_cards)
+
+        await asyncio.sleep(3)
+        outcome = ""
+        if player_total > banker_total:
+            outcome = "플"
+        elif banker_total > player_total:
+            outcome = "뱅"
+        else:
+            outcome = "타이"
+
+        results.setdefault("history", []).append(f"플:{player_total} vs 뱅:{banker_total} → {outcome}")
+        results["history"] = results["history"][-50:]
+        save_json(results_file, results)
+
+        # 결과 정산
+        for user_id, user_bets in bets.items():
+            user = users.get(user_id, {"balance": 100000})
+            for bet in user_bets:
+                if bet["type"] == f"/{outcome}":
+                    user["balance"] += bet["amount"] * 2
+            users[user_id] = user
+
+        save_json(users_file, users)
+        save_json(bets_file, {})
+
+        await broadcast(f"🎲 이번 결과: {outcome} (플:{player_total} / 뱅:{banker_total})")
+
+async def broadcast(message):
+    users = load_json(users_file)
+    for uid in users:
+        try:
+            await app.bot.send_message(chat_id=int(uid), text=message)
+        except:
+            pass
 
 async def main():
     global app
@@ -114,7 +147,7 @@ async def main():
 
     app.add_handler(MessageHandler(filters.Regex(r"^/내정보$"), my_info))
     app.add_handler(MessageHandler(filters.Regex(r"^/바카라$"), baccarat_history))
-    app.add_handler(MessageHandler(filters.Regex(r"^/(뱅|플|타이|플페어|뱅페어) \d+$"), handle_bet))
+    app.add_handler(MessageHandler(filters.Regex(r"^/(뱅|플|타이|플페어|플뱅커) \d+$"), handle_bet))
 
     asyncio.create_task(game_loop())
     await app.run_polling()
