@@ -4,7 +4,7 @@ import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = 'YOUR_BOT_TOKEN'  # ← 여기에 텔레그램 봇 토큰 입력
+TOKEN = '8016454304:AAGseFUZMxvdp1HzeLiakKNyMy3Envgk0J4'  # ← 여기에 텔레그램 봇 토큰 입력
 
 USERS_FILE = 'users.json'
 BETS_FILE = 'bets.json'
